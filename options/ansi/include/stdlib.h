@@ -111,6 +111,8 @@ int wctomb(char *__mb_chr, wchar_t __wc);
 size_t mbstowcs(wchar_t *__restrict __wc_string, const char *__restrict __mb_string, size_t __max_size);
 size_t wcstombs(char *__restrict __mb_string, const wchar_t *__restrict __wc_string, size_t __max_size);
 
+char *itoa(int __value, char *__str);
+
 #endif /* !__MLIBC_ABI_ONLY */
 
 #ifdef __cplusplus

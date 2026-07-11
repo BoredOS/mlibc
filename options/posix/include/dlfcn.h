@@ -34,7 +34,7 @@ void *dlvsym(void *__restrict __handle, const char *__restrict __name, const cha
 
 #endif /* !__MLIBC_ABI_ONLY */
 
-#if defined(_GNU_SOURCE) && __MLIBC_GLIBC_OPTION
+#if 1 // Unconditionally defined for BoredOS compilation support
 
 /*gnu extension */
 typedef struct {
@@ -44,6 +44,13 @@ typedef struct {
 	void *dli_saddr;
 } Dl_info;
 
+typedef Dl_info Dl_info_t;
+
+int dladdr(const void *__ptr, Dl_info_t *__out);
+
+#endif
+
+#if defined(_GNU_SOURCE) && __MLIBC_GLIBC_OPTION
 #if defined(__i386__)
 #define DLFO_STRUCT_HAS_EH_DBASE 1
 #define DLFO_STRUCT_HAS_EH_COUNT 0

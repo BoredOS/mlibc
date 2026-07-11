@@ -510,3 +510,8 @@ int posix_memalign(void **out, size_t align, size_t size) {
 	*out = p;
 	return 0;
 }
+
+char *itoa(int value, char *str) {
+	sprintf(str, "%d", value);
+	return str;
+}

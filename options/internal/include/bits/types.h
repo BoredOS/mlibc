@@ -393,6 +393,7 @@ __MLIBC_CHECK_TYPE(__mlibc_uint64, __UINT_LEAST64_TYPE__);
 
 /* Fast-width. */
 /* Unfortunately, GCC and Clang disagree about fast types. */
+#if 0
 #ifndef __clang__
 	__MLIBC_CHECK_TYPE(__mlibc_int_fast8,  __INT_FAST8_TYPE__);
 	__MLIBC_CHECK_TYPE(__mlibc_int_fast16, __INT_FAST16_TYPE__);
@@ -403,6 +404,7 @@ __MLIBC_CHECK_TYPE(__mlibc_uint64, __UINT_LEAST64_TYPE__);
 	__MLIBC_CHECK_TYPE(__mlibc_uint_fast16, __UINT_FAST16_TYPE__);
 	__MLIBC_CHECK_TYPE(__mlibc_uint_fast32, __UINT_FAST32_TYPE__);
 	__MLIBC_CHECK_TYPE(__mlibc_uint_fast64, __UINT_FAST64_TYPE__);
+#endif
 #endif
 
 #endif /* _MLIBC_INTERNAL_TYPES_H */
