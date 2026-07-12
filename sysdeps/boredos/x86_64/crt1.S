@@ -12,16 +12,14 @@ __dso_handle:
     .quad 0
 
 _start:
-    # At entry, %rdi = argc, %rsi = argv.
-    # We need to call: __mlibc_entry(main, argc, argv)
+    # At entry, rsp points to the System V ABI stack frame.
+    # We need to call: __mlibc_entry(rsp, main)
     # Register mapping for __mlibc_entry:
-    # %rdi: main function pointer
-    # %rsi: argc
-    # %rdx: argv
+    # %rdi: entry_stack (rsp)
+    # %rsi: main function pointer
 
-    mov rdx, rsi                  # argv -> 3rd argument
-    mov rsi, rdi                  # argc -> 2nd argument
-    lea rdi, main[rip]            # main -> 1st argument
+    mov rdi, rsp                  # rsp -> 1st argument (entry_stack)
+    lea rsi, main[rip]            # main -> 2nd argument
 
     # Align the stack to 16 bytes for System V ABI compatibility
     and rsp, -16
