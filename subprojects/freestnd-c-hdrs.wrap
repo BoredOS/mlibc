@@ -1,4 +1,4 @@
 [wrap-git]
 directory = freestnd-c-hdrs
 url = https://codeberg.org/osdev/freestnd-c-hdrs.git
-revision = trunk
+revision = d33711241b46ecb8f2ad33927fcefdcb3ac0162e
