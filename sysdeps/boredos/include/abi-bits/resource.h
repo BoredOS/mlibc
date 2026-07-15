@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include <mlibc-config.h>
-#include <bits/timeval.h>
+#include <bits/posix/timeval.h>
 
 #if defined(_GNU_SOURCE)
 #define PRIO_MIN (-20)

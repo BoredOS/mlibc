@@ -353,10 +353,8 @@ if glibc_option
 	libc_include_dirs += include_directories('options/glibc/include')
 endif
 
-if bsd_option
-	rtld_include_dirs += include_directories('options/bsd/include')
-	libc_include_dirs += include_directories('options/bsd/include')
-endif
+rtld_include_dirs += include_directories('options/bsd/include')
+libc_include_dirs += include_directories('options/bsd/include')
 
 rtld_include_dirs += include_directories('options/elf/include')
 libc_include_dirs += include_directories('options/elf/include')

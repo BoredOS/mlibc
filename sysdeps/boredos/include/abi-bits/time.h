@@ -1,7 +1,7 @@
 #ifndef _ABIBITS_TIME_H
 #define _ABIBITS_TIME_H
 
-#include <bits/timeval.h>
+#include <bits/posix/timeval.h>
 
 struct itimerval {
 	struct timeval it_interval;	/* Interval for periodic timer */

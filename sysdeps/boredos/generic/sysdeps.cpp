@@ -19,19 +19,19 @@
 namespace mlibc {
 
 // Panic implementation
-void Sysdeps<LibcPanic>::operator()() {
-    sysdep<LibcLog>("!!! mlibc panic !!!\n");
-    sysdep<Exit>(-1);
+void sys_libc_panic() {
+    sys_libc_log("!!! mlibc panic !!!\n");
+    sys_exit(-1);
     __builtin_trap();
 }
 
 // Log implementation
-void Sysdeps<LibcLog>::operator()(const char *msg) {
+void sys_libc_log(const char *msg) {
     syscall3(SYS_WRITE, 2, (uint64_t)msg, strlen(msg));
 }
 
 // Check if fd is a TTY
-int Sysdeps<Isatty>::operator()(int fd) {
+int sys_isatty(int fd) {
     if (fd == 0 || fd == 1 || fd == 2) {
         return 0; // 0 means success (it is a TTY) in mlibc sysdeps
     }
@@ -39,7 +39,7 @@ int Sysdeps<Isatty>::operator()(int fd) {
 }
 
 // Standard file descriptor write
-int Sysdeps<Write>::operator()(int fd, void const *buf, size_t size, ssize_t *ret) {
+int sys_write(int fd, void const *buf, size_t size, ssize_t *ret) {
     long rc = syscall3(SYS_WRITE, fd, (uint64_t)buf, size);
     if (rc < 0) {
         if (rc == -2) return EAGAIN;
@@ -50,7 +50,7 @@ int Sysdeps<Write>::operator()(int fd, void const *buf, size_t size, ssize_t *re
 }
 
 // Standard file descriptor read
-int Sysdeps<Read>::operator()(int fd, void *buf, size_t size, ssize_t *ret) {
+int sys_read(int fd, void *buf, size_t size, ssize_t *ret) {
     long rc = syscall3(SYS_READ, fd, (uint64_t)buf, size);
     if (rc < 0) {
         if (rc == -2) return EAGAIN;
@@ -81,7 +81,7 @@ static const char *mode_from_flags(int flags) {
 }
 
 // Open file
-int Sysdeps<Open>::operator()(const char *path, int flags, mode_t mode, int *fd) {
+int sys_open(const char *path, int flags, mode_t mode, int *fd) {
     (void)mode;
     
     // Check path exists unless creating
@@ -102,7 +102,7 @@ int Sysdeps<Open>::operator()(const char *path, int flags, mode_t mode, int *fd)
 }
 
 // Close file
-int Sysdeps<Close>::operator()(int fd) {
+int sys_close(int fd) {
     long rc = syscall1(SYS_CLOSE, fd);
     if (rc < 0) {
         return -rc;
@@ -111,9 +111,9 @@ int Sysdeps<Close>::operator()(int fd) {
 }
 
 // Seek file
-int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *ret) {
+int sys_seek(int fd, off_t offset, int whence, off_t *ret) {
     int is_a_tty = 0;
-    if (sysdep<Isatty>(fd) == 0) {
+    if (sys_isatty(fd) == 0) {
         return ESPIPE;
     }
 
@@ -127,13 +127,13 @@ int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *ret) {
 }
 
 // Exit process
-void Sysdeps<Exit>::operator()(int status) {
+void sys_exit(int status) {
     syscall1(SYS_EXIT, status);
     while (true) {}
 }
 
 // Sleep
-int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
+int sys_sleep(time_t *secs, long *nanos) {
     long ms = (*secs * 1000) + (*nanos / 1000000);
     long rc = syscall1(SYS_NANOSLEEP, ms);
     if (rc < 0) {
@@ -145,7 +145,7 @@ int Sysdeps<Sleep>::operator()(time_t *secs, long *nanos) {
 }
 
 // Anonymous memory allocation using sys_mmap
-int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
+int sys_anon_allocate(size_t size, void **pointer) {
     long rc = syscall6(SYS_MMAP, 0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (rc == (long)MAP_FAILED || rc < 0) {
         return ENOMEM;
@@ -155,7 +155,7 @@ int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
 }
 
 // Anonymous memory free
-int Sysdeps<AnonFree>::operator()(void *ptr, size_t size) {
+int sys_anon_free(void *ptr, size_t size) {
     long rc = syscall2(SYS_MUNMAP, (uint64_t)ptr, size);
     if (rc < 0) {
         return -rc;
@@ -164,7 +164,7 @@ int Sysdeps<AnonFree>::operator()(void *ptr, size_t size) {
 }
 
 // VM Map
-int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
+int sys_vm_map(void *hint, size_t size, int prot, int flags, int fd, off_t offset, void **window) {
     long rc = syscall6(SYS_MMAP, (uint64_t)hint, size, prot, flags, fd, offset);
     if (rc == (long)MAP_FAILED || rc < 0) {
         return ENOMEM;
@@ -174,7 +174,7 @@ int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags, int
 }
 
 // VM Unmap
-int Sysdeps<VmUnmap>::operator()(void *ptr, size_t size) {
+int sys_vm_unmap(void *ptr, size_t size) {
     long rc = syscall2(SYS_MUNMAP, (uint64_t)ptr, size);
     if (rc < 0) {
         return -rc;
@@ -215,7 +215,7 @@ static time_t seconds_from_ymdhms(int year, int month, int day, int hour, int mi
 }
 
 // Clock Get
-int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
+int sys_clock_get(int clock, time_t *secs, long *nanos) {
     if (clock == CLOCK_REALTIME) {
         int dt[6] = {1970, 1, 1, 0, 0, 0};
         if (rtc_get(dt) == 0) {
@@ -235,7 +235,7 @@ int Sysdeps<ClockGet>::operator()(int clock, time_t *secs, long *nanos) {
 }
 
 // Futex wait
-int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
+int sys_futex_wait(int *pointer, int expected, const struct timespec *time) {
     (void)time; // Ignore timeout for simplicity
     long rc = syscall4(SYS_FUTEX, (uint64_t)pointer, FUTEX_WAIT, expected, 0);
     if (rc < 0) {
@@ -245,8 +245,7 @@ int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct time
 }
 
 // Futex wake
-int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
-    (void)all;
+int sys_futex_wake(int *pointer) {
     long rc = syscall2(SYS_FUTEX, (uint64_t)pointer, FUTEX_WAKE);
     if (rc < 0) {
         return -rc;
@@ -255,7 +254,7 @@ int Sysdeps<FutexWake>::operator()(int *pointer, bool all) {
 }
 
 // Fork
-int Sysdeps<Fork>::operator()(pid_t *out_child) {
+int sys_fork(pid_t *out_child) {
     long rc = syscall0(SYS_FORK);
     if (rc < 0) {
         return -rc;
@@ -265,7 +264,7 @@ int Sysdeps<Fork>::operator()(pid_t *out_child) {
 }
 
 // Execve
-int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
+int sys_execve(const char *path, char *const argv[], char *const envp[]) {
     (void)envp;
     
     // Join arguments into a single space-separated string (as expected by BoredOS sys_exec)
@@ -296,7 +295,7 @@ int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *cons
 }
 
 // Waitpid
-int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
+int sys_waitpid(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
     (void)ru;
     long rc = syscall3(SYS_WAIT4, pid, (uint64_t)status, flags);
     if (rc < 0) {
@@ -307,12 +306,12 @@ int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusag
 }
 
 // GetPid
-pid_t Sysdeps<GetPid>::operator()() {
+pid_t sys_getpid() {
     return syscall0(SYS_GETPID);
 }
 
 // GetCwd
-int Sysdeps<GetCwd>::operator()(char *buffer, size_t size) {
+int sys_getcwd(char *buffer, size_t size) {
     long rc = syscall2(SYS_GETCWD, (uint64_t)buffer, size);
     if (rc < 0) {
         return -rc;
@@ -321,7 +320,7 @@ int Sysdeps<GetCwd>::operator()(char *buffer, size_t size) {
 }
 
 // Chdir
-int Sysdeps<Chdir>::operator()(const char *path) {
+int sys_chdir(const char *path) {
     long rc = syscall1(SYS_CHDIR, (uint64_t)path);
     if (rc < 0) {
         return -rc;
@@ -330,7 +329,7 @@ int Sysdeps<Chdir>::operator()(const char *path) {
 }
 
 // Mkdir
-int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
+int sys_mkdir(const char *path, mode_t mode) {
     (void)mode;
     if (sys_exists(path)) {
         return EEXIST;
@@ -343,7 +342,7 @@ int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
 }
 
 // Unlinkat
-int Sysdeps<Unlinkat>::operator()(int dirfd, const char *path, int flags) {
+int sys_unlinkat(int dirfd, const char *path, int flags) {
     (void)dirfd;
     (void)flags;
     long rc = syscall1(SYS_UNLINK, (uint64_t)path);
@@ -354,7 +353,7 @@ int Sysdeps<Unlinkat>::operator()(int dirfd, const char *path, int flags) {
 }
 
 // Dup
-int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
+int sys_dup(int fd, int flags, int *newfd) {
     (void)flags;
     long rc = syscall1(SYS_DUP, fd);
     if (rc < 0) {
@@ -365,7 +364,7 @@ int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
 }
 
 // Dup2
-int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
+int sys_dup2(int fd, int flags, int newfd) {
     (void)flags;
     long rc = syscall2(SYS_DUP2, fd, newfd);
     if (rc < 0) {
@@ -375,7 +374,7 @@ int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 }
 
 // Pipe
-int Sysdeps<Pipe>::operator()(int pipefd[2], int flags) {
+int sys_pipe(int pipefd[2], int flags) {
     (void)flags;
     long rc = syscall1(SYS_PIPE, (uint64_t)pipefd);
     if (rc < 0) {
@@ -385,7 +384,7 @@ int Sysdeps<Pipe>::operator()(int pipefd[2], int flags) {
 }
 
 // Fcntl
-int Sysdeps<Fcntl>::operator()(int fd, int cmd, va_list args, int *result) {
+int sys_fcntl(int fd, int cmd, va_list args, int *result) {
     uint64_t arg = va_arg(args, uint64_t);
     long rc = syscall3(SYS_FCNTL, fd, cmd, arg);
     if (rc < 0) {
@@ -396,7 +395,7 @@ int Sysdeps<Fcntl>::operator()(int fd, int cmd, va_list args, int *result) {
 }
 
 // Poll
-int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t nfds, int timeout, int *result) {
+int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout, int *result) {
     long rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, timeout);
     if (rc == -2) {
         // If we blocked and woke up, query the state non-blockingly (timeout = 0)
@@ -412,7 +411,7 @@ int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t nfds, int timeout, int 
 }
 
 // Ioctl
-int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
+int sys_ioctl(int fd, unsigned long request, void *arg, int *result) {
     // Intercept Termios get/set attributes since BoredOS kernel does not back termios
     if (request == TCGETS) {
         struct termios *termios_p = (struct termios *)arg;
@@ -440,7 +439,7 @@ int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *re
 }
 
 // Sockets: Socket
-int Sysdeps<Socket>::operator()(int domain, int type, int protocol, int *fd) {
+int sys_socket(int domain, int type, int protocol, int *fd) {
     long rc = syscall3(SYS_SOCKET, domain, type, protocol);
     if (rc < 0) {
         return -rc;
@@ -450,7 +449,7 @@ int Sysdeps<Socket>::operator()(int domain, int type, int protocol, int *fd) {
 }
 
 // Sockets: Connect
-int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+int sys_connect(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     long rc = syscall3(SYS_CONNECT, fd, (uint64_t)addr, addrlen);
     if (rc < 0) {
         return -rc;
@@ -459,7 +458,7 @@ int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr, socklen_t 
 }
 
 // Sockets: Bind
-int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr, socklen_t addrlen) {
+int sys_bind(int fd, const struct sockaddr *addr, socklen_t addrlen) {
     long rc = syscall3(SYS_BIND, fd, (uint64_t)addr, addrlen);
     if (rc < 0) {
         return -rc;
@@ -468,7 +467,7 @@ int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr, socklen_t add
 }
 
 // Sockets: Listen
-int Sysdeps<Listen>::operator()(int fd, int backlog) {
+int sys_listen(int fd, int backlog) {
     long rc = syscall2(SYS_LISTEN, fd, backlog);
     if (rc < 0) {
         return -rc;
@@ -477,7 +476,7 @@ int Sysdeps<Listen>::operator()(int fd, int backlog) {
 }
 
 // Sockets: Accept
-int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
+int sys_accept(int fd, int *newfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
     (void)flags;
     long rc;
     
@@ -504,7 +503,7 @@ int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr, sockl
 }
 
 // Sockets: Sendto
-int Sysdeps<Sendto>::operator()(int fd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, ssize_t *length) {
+ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, ssize_t *length) {
     long rc;
     if (dest_addr == nullptr) {
         rc = syscall3(SYS_WRITE, fd, (uint64_t)buf, len);
@@ -520,7 +519,7 @@ int Sysdeps<Sendto>::operator()(int fd, const void *buf, size_t len, int flags, 
 }
 
 // Sockets: Recvfrom
-int Sysdeps<Recvfrom>::operator()(int fd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, ssize_t *length) {
+ssize_t sys_recvfrom(int fd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, ssize_t *length) {
     long rc;
     if (src_addr == nullptr) {
         rc = syscall3(SYS_READ, fd, (uint64_t)buf, len);
@@ -540,7 +539,7 @@ int Sysdeps<Recvfrom>::operator()(int fd, void *buf, size_t len, int flags, stru
 }
 
 // Signals: Sigaction
-int Sysdeps<Sigaction>::operator()(int sig, const struct sigaction *act, struct sigaction *oact) {
+int sys_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
     long rc = syscall3(SYS_RT_SIGACTION, sig, (uint64_t)act, (uint64_t)oact);
     if (rc < 0) {
         return -rc;
@@ -549,7 +548,7 @@ int Sysdeps<Sigaction>::operator()(int sig, const struct sigaction *act, struct 
 }
 
 // Signals: Sigprocmask
-int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *set, sigset_t *o_set) {
+int sys_sigprocmask(int how, const sigset_t *set, sigset_t *o_set) {
     long rc = syscall3(SYS_RT_SIGPROCMASK, how, (uint64_t)set, (uint64_t)o_set);
     if (rc < 0) {
         return -rc;
@@ -558,7 +557,7 @@ int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *set, sigset_t *o_s
 }
 
 // Signals: Sigpending
-int Sysdeps<Sigpending>::operator()(sigset_t *set) {
+int sys_sigpending(sigset_t *set) {
     long rc = syscall1(SYS_RT_SIGPENDING, (uint64_t)set);
     if (rc < 0) {
         return -rc;
@@ -567,7 +566,7 @@ int Sysdeps<Sigpending>::operator()(sigset_t *set) {
 }
 
 // Signals: Kill
-int Sysdeps<Kill>::operator()(pid_t pid, int sig) {
+int sys_kill(pid_t pid, int sig) {
     long rc = syscall2(SYS_KILL, pid, sig);
     if (rc < 0) {
         return -rc;
@@ -576,7 +575,7 @@ int Sysdeps<Kill>::operator()(pid_t pid, int sig) {
 }
 
 // Thread Set TCB (Stub for static compiler/runtime)
-int Sysdeps<TcbSet>::operator()(void *pointer) {
+int sys_tcb_set(void *pointer) {
     // In BoredOS, thread base is set via FS register using arch_prctl
     // SYS_ARCH_PRCTL (158) with ARCH_SET_FS (0x1002)
     long rc = syscall2(SYS_ARCH_PRCTL, 0x1002, (uint64_t)pointer);
@@ -587,7 +586,7 @@ int Sysdeps<TcbSet>::operator()(void *pointer) {
 }
 
 // Access check
-int Sysdeps<Access>::operator()(const char *path, int mode) {
+int sys_access(const char *path, int mode) {
     (void)mode;
     if (!sys_exists(path)) {
         return ENOENT;
@@ -596,7 +595,7 @@ int Sysdeps<Access>::operator()(const char *path, int mode) {
 }
 
 // Stat (file metadata)
-int Sysdeps<Stat>::operator()(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
+int sys_stat(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat *statbuf) {
     (void)flags;
     
     // Initialize statbuf to default empty values
@@ -664,13 +663,13 @@ int Sysdeps<Stat>::operator()(fsfd_target fsfdt, int fd, const char *path, int f
 }
 
 // Termios tcgetattr
-int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr) {
+int sys_tcgetattr(int fd, struct termios *attr) {
     int result = 0;
-    return sysdep<Ioctl>(fd, TCGETS, attr, &result);
+    return sys_ioctl(fd, TCGETS, attr, &result);
 }
 
 // Termios tcsetattr
-int Sysdeps<Tcsetattr>::operator()(int fd, int optional_action, const struct termios *attr) {
+int sys_tcsetattr(int fd, int optional_action, const struct termios *attr) {
     int req;
     switch (optional_action) {
         case TCSANOW: req = TCSETS; break;
@@ -679,11 +678,11 @@ int Sysdeps<Tcsetattr>::operator()(int fd, int optional_action, const struct ter
         default: return EINVAL;
     }
     int result = 0;
-    return sysdep<Ioctl>(fd, req, const_cast<struct termios *>(attr), &result);
+    return sys_ioctl(fd, req, const_cast<struct termios *>(attr), &result);
 }
 
 int perform_ioctl(int fd, unsigned long request, void *arg, int *result) {
-    return sysdep<Ioctl>(fd, request, arg, result);
+    return sys_ioctl(fd, request, arg, result);
 }
 
 } // namespace mlibc

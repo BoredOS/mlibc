@@ -7,7 +7,7 @@
 #include <abi-bits/sigevent.h>
 #include <abi-bits/sigset_t.h>
 #include <abi-bits/uid_t.h>
-#include <bits/ansi/clock_t.h>
+#include <time.h>
 #include <bits/size_t.h>
 #include <bits/types.h>
 
@@ -159,12 +159,10 @@ typedef void (*__sighandler) (int);
 #define SIGCANCEL 32
 #define SIGTIMER  33
 
-#if __MLIBC_XOPEN
 #define MINSIGSTKSZ 2048
 #define SIGSTKSZ 8192
 #define SS_ONSTACK 1
 #define SS_DISABLE 2
-#endif
 
 typedef struct __stack {
 	void *ss_sp;
@@ -197,10 +195,7 @@ typedef struct __stack {
 #define ILL_BADSTK 8
 #define ILL_BADIADDR 9
 
-#define _NSIG 65
-#if defined(_DEFAULT_SOURCE)
-#define NSIG _NSIG
-#endif
+#define NSIG 65
 
 #define SI_ASYNCNL (-60)
 #define SI_TKILL (-6)

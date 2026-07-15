@@ -1,6 +1,8 @@
 sysdep_supported_options = {
     'posix': true,
+    'linux': false,
     'glibc': true,
+    'bsd': false,
 }
 
 # Source files
