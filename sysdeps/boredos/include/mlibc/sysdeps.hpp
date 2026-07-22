@@ -51,7 +51,12 @@ struct BoredOSSysdepTags :
 	Stat,
 	Tcgetattr,
 	Tcsetattr,
-	TcbSet
+	TcbSet,
+	PrepareStack,
+	Clone,
+	Yield,
+	GetTid,
+	ThreadExit
 {};
 
 template<typename Tag>

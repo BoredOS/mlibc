@@ -15,6 +15,8 @@ libc_sources += files(
     'generic/entry.cpp',
     'generic/sysdeps.cpp',
     'generic/syscall_wrappers.cpp',
+    'generic/thread.cpp',
+    'generic/thread.S',
     host_machine.cpu_family() + '/syscall.S'
 )
 

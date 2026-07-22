@@ -230,7 +230,7 @@ int sys_vm_unmap(void *pointer, size_t size);
 [[gnu::weak]] int sys_thread_setname(void *tcb, const char *name);
 [[gnu::weak]] int sys_thread_getname(void *tcb, char *name, size_t size);
 
-[[gnu::weak]] int sys_sysconf(int num, long *ret);
+int sys_sysconf(int num, long *ret);
 
 [[gnu::weak]] int sys_semget(key_t key, int n, int fl, int *id);
 [[gnu::weak]] int sys_semctl(int semid, int semnum, int cmd, void *semun, int *ret);

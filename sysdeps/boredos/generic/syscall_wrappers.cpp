@@ -193,7 +193,7 @@ int sys_poll(void *fds, int nfds, int timeout) {
                 break;
             }
             uint32_t now = (uint32_t)get_ticks();
-            int elapsed = (int)(now - start_ticks) * 16;
+            int elapsed = (int)(now - start_ticks);
             if (elapsed >= timeout) {
                 rc = 0;
                 break;
@@ -399,7 +399,7 @@ int dns_lookup(const char *name, net_ipv4_address_t *out_ip) {
     uint8_t resp[1024];
     int resp_len = -1;
     int start_ticks = get_ticks();
-    while (get_ticks() - start_ticks < 300) {
+    while (get_ticks() - start_ticks < 5000) {
         struct sockaddr_in src_addr;
         uint64_t addr_len = sizeof(src_addr);
         resp_len = (int)syscall6(SYS_RECVFROM, (uint64_t)sockfd, (uint64_t)resp, sizeof(resp), 0, (uint64_t)&src_addr, (uint64_t)&addr_len);

@@ -5,6 +5,8 @@
 #include <abi-bits/termios.h>
 #include <abi-bits/poll.h>
 #include <abi-bits/signal.h>
+#include <sys/mman.h>
+#include <errno.h>
 #include <mlibc/all-sysdeps.hpp>
 #include <mlibc/tcb.hpp>
 #include <string.h>
@@ -246,7 +248,7 @@ int sys_futex_wait(int *pointer, int expected, const struct timespec *time) {
 
 // Futex wake
 int sys_futex_wake(int *pointer) {
-    long rc = syscall2(SYS_FUTEX, (uint64_t)pointer, FUTEX_WAKE);
+    long rc = syscall3(SYS_FUTEX, (uint64_t)pointer, FUTEX_WAKE, 0x7fffffff);
     if (rc < 0) {
         return -rc;
     }
