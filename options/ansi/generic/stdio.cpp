@@ -507,13 +507,16 @@ static int do_scanf(H &handler, const char *fmt, __builtin_va_list args) {
 					case 10:
 						NOMATCH_CHECK(!isdigit(c));
 						while (c >= '0' && c <= '9') {
+							if (width > 0 && count >= width) break;
 							handler.consume();
 							res = res * 10 + (c - '0');
+							count++;
 							c = handler.look_ahead();
 						}
 						break;
 					case 16:
 						while (true) {
+							if (width > 0 && count >= width) break;
 							if (c >= '0' && c <= '9') {
 								handler.consume();
 								res = res * 16 + (c - '0');
@@ -533,8 +536,10 @@ static int do_scanf(H &handler, const char *fmt, __builtin_va_list args) {
 						break;
 					case 8:
 						while (c >= '0' && c <= '7') {
+							if (width > 0 && count >= width) break;
 							handler.consume();
 							res = res * 8 + (c - '0');
+							count++;
 							c = handler.look_ahead();
 						}
 						break;
@@ -551,11 +556,14 @@ static int do_scanf(H &handler, const char *fmt, __builtin_va_list args) {
 			case 'o': {
 				unsigned long long res = 0;
 				char c = handler.look_ahead();
+				int count = 0;
 				EOF_CHECK(c == '\0');
 				NOMATCH_CHECK(!(c >= '0' && c <= '7'));
 				while (c >= '0' && c <= '7') {
+					if (width > 0 && count >= width) break;
 					handler.consume();
 					res = res * 8 + (c - '0');
+					count++;
 					c = handler.look_ahead();
 				}
 				if (dest)
@@ -577,6 +585,7 @@ static int do_scanf(H &handler, const char *fmt, __builtin_va_list args) {
 					}
 				}
 				while (true) {
+					if (width > 0 && count >= width) break;
 					if (c >= '0' && c <= '9') {
 						handler.consume();
 						res = res * 16 + (c - '0');
