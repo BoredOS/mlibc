@@ -12,6 +12,7 @@
 #include <string.h>
 #include <syscall.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #define TCGETS 0x5401
 #define TCSETS 0x5402
@@ -32,12 +33,35 @@ void sys_libc_log(const char *msg) {
     syscall3(SYS_WRITE, 2, (uint64_t)msg, strlen(msg));
 }
 
+#define TIOCGWINSZ 0x5413
+
 // Check if fd is a TTY
 int sys_isatty(int fd) {
-    if (fd == 0 || fd == 1 || fd == 2) {
+    struct winsize ws;
+    int result = 0;
+    if (sys_ioctl(fd, TIOCGWINSZ, &ws, &result) == 0) {
         return 0; // 0 means success (it is a TTY) in mlibc sysdeps
     }
+    if (fd == 0 || fd == 1 || fd == 2) {
+        return 0;
+    }
     return ENOTTY;
+}
+
+int sys_ptsname(int fd, char *buffer, size_t length) {
+    int index = 0;
+    int result = 0;
+    if (int e = sys_ioctl(fd, 0x80045430 /* TIOCGPTN */, &index, &result); e) {
+        return e;
+    }
+    snprintf(buffer, length, "/dev/pts/%d", index);
+    return 0;
+}
+
+int sys_unlockpt(int fd) {
+    int unlock = 0;
+    int result = 0;
+    return sys_ioctl(fd, 0x40045431 /* TIOCSPTLCK */, &unlock, &result);
 }
 
 // Standard file descriptor write
@@ -114,7 +138,6 @@ int sys_close(int fd) {
 
 // Seek file
 int sys_seek(int fd, off_t offset, int whence, off_t *ret) {
-    int is_a_tty = 0;
     if (sys_isatty(fd) == 0) {
         return ESPIPE;
     }

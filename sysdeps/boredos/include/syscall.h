@@ -62,19 +62,7 @@ enum {
     SYS_FS_STATFS = 304,
     SYS_FS_MOUNT_COUNT = 305,
     SYS_FS_MOUNT_INFO = 306,
-    SYS_TTY_CREATE = 307,
-    SYS_TTY_READ_OUT = 308,
-    SYS_TTY_WRITE_IN = 309,
-    SYS_TTY_READ_IN = 310,
-    SYS_TTY_DESTROY = 311,
-    SYS_TTY_SET_FG = 312,
-    SYS_TTY_GET_FG = 313,
-    SYS_TTY_KILL_FG = 314,
-    SYS_TTY_KILL_ALL = 315,
-    SYS_TTY_GET_ID = 316,
     SYS_SPAWN = 317,
-    SYS_PTY_CREATE = 320,
-    SYS_PTY_DESTROY = 321,
     SYS_DISK_GET_COUNT = 322,
     SYS_DISK_GET_INFO = 323,
     SYS_DISK_WRITE_GPT = 324,
@@ -151,16 +139,6 @@ int sys_pipe(int pipefd[2]);
 int sys_fcntl(int fd, int cmd, int val);
 void *sys_sbrk(int incr);
 
-int sys_tty_create(void);
-int sys_tty_read_out(int tty_id, char *buf, int len);
-int sys_tty_write_in(int tty_id, const char *buf, int len);
-int sys_tty_read_in(char *buf, int len);
-int sys_tty_destroy(int tty_id);
-int sys_tty_set_fg(int tty_id, int pid);
-int sys_tty_get_fg(int tty_id);
-int sys_tty_kill_fg(int tty_id);
-int sys_tty_kill_all(int tty_id);
-int sys_tty_get_id(void);
 int sys_getpid(void);
 
 int sys_spawn(const char *path, const char *args, uint64_t flags, uint64_t tty_id);
