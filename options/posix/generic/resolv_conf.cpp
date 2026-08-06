@@ -5,14 +5,17 @@
 
 namespace mlibc {
 
-frg::optional<struct nameserver_data> get_nameserver() {
+static constexpr int MAX_NAMESERVERS = 3;
+
+frg::vector<nameserver_data, MemoryAllocator> get_nameservers() {
+	frg::vector<nameserver_data, MemoryAllocator> servers{getAllocator()};
+
 	auto file = fopen("/etc/resolv.conf", "r");
 	if (!file)
-		return frg::null_opt;
+		return servers;
 
 	char line[128];
-	struct nameserver_data ret;
-	while (fgets(line, 128, file)) {
+	while (fgets(line, 128, file) && (int)servers.size() < MAX_NAMESERVERS) {
 		char *pos;
 		if (!strchr(line, '\n') && !feof(file)) {
 			// skip truncated lines
@@ -20,23 +23,27 @@ frg::optional<struct nameserver_data> get_nameserver() {
 			continue;
 		}
 
-		// TODO(geert): resolv.conf can actually have multiple nameservers
-		// but we just pick the first one for now
 		if (!strncmp(line, "nameserver", 10) && isspace(line[10])) {
 			char *end;
 			for (pos = line + 11; isspace(*pos); pos++);
 			for (end = pos; *end && !isspace(*end); end++);
 			*end = '\0';
-			ret.name = frg::string<MemoryAllocator>(
-					pos, end - pos, getAllocator());
-			break;
+
+			nameserver_data ns;
+			ns.name = frg::string<MemoryAllocator>(pos, end - pos, getAllocator());
+			servers.push(std::move(ns));
 		}
 	}
 
 	fclose(file);
-	if(ret.name.empty())
+	return servers;
+}
+
+frg::optional<struct nameserver_data> get_nameserver() {
+	auto servers = get_nameservers();
+	if (servers.size() == 0)
 		return frg::null_opt;
-	return ret;
+	return servers[0];
 }
 
 } // namespace mlibc

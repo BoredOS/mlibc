@@ -10,6 +10,7 @@
 #include <mlibc/all-sysdeps.hpp>
 #include <mlibc/tcb.hpp>
 #include <string.h>
+#include <stdlib.h>
 #include <syscall.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -423,15 +424,100 @@ int sys_fcntl(int fd, int cmd, va_list args, int *result) {
 int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout, int *result) {
     long rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, timeout);
     if (rc == -2) {
-        // If we blocked and woke up, query the state non-blockingly (timeout = 0)
-        // or block indefinitely if timeout was -1.
-        int next_timeout = (timeout < 0) ? -1 : 0;
-        while ((rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, next_timeout)) == -2) {}
+        if (timeout >= 0) {
+            *result = 0;
+            return 0;
+        }
+        while ((rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, -1)) == -2) {}
     }
     if (rc < 0) {
         return -rc;
     }
     *result = rc;
+    return 0;
+}
+
+// Pselect
+int sys_pselect(
+    int nfds,
+    fd_set *read_set,
+    fd_set *write_set,
+    fd_set *except_set,
+    const struct timespec *timeout,
+    const sigset_t *sigmask,
+    int *num_events
+) {
+    (void)sigmask;
+    if (nfds <= 0) {
+        if (read_set) FD_ZERO(read_set);
+        if (write_set) FD_ZERO(write_set);
+        if (except_set) FD_ZERO(except_set);
+        *num_events = 0;
+        return 0;
+    }
+
+    struct pollfd stack_fds[64];
+    struct pollfd *fds = stack_fds;
+    if (nfds > 64) {
+        fds = (struct pollfd *)calloc(nfds, sizeof(struct pollfd));
+        if (!fds) return ENOMEM;
+    } else {
+        memset(stack_fds, 0, sizeof(struct pollfd) * nfds);
+    }
+
+    for (int i = 0; i < nfds; i++) {
+        struct pollfd *fd = &fds[i];
+        if (read_set && FD_ISSET(i, read_set)) fd->events |= POLLIN;
+        if (write_set && FD_ISSET(i, write_set)) fd->events |= POLLOUT;
+        if (except_set && FD_ISSET(i, except_set)) fd->events |= POLLPRI;
+
+        if (!fd->events) {
+            fd->fd = -1;
+            continue;
+        }
+        fd->fd = i;
+    }
+
+    int timeout_ms = -1;
+    if (timeout) {
+        timeout_ms = timeout->tv_sec * 1000 + timeout->tv_nsec / 1000000;
+    }
+
+    int poll_result = 0;
+    int e = sys_poll(fds, nfds, timeout_ms, &poll_result);
+    if (e != 0) {
+        if (fds != stack_fds) free(fds);
+        return e;
+    }
+
+    int count = 0;
+    fd_set res_read_set, res_write_set, res_except_set;
+    FD_ZERO(&res_read_set);
+    FD_ZERO(&res_write_set);
+    FD_ZERO(&res_except_set);
+
+    for (int i = 0; i < nfds; i++) {
+        struct pollfd *fd = &fds[i];
+        if (read_set && FD_ISSET(i, read_set) && (fd->revents & (POLLIN | POLLERR | POLLHUP))) {
+            FD_SET(i, &res_read_set);
+            count++;
+        }
+        if (write_set && FD_ISSET(i, write_set) && (fd->revents & (POLLOUT | POLLERR | POLLHUP))) {
+            FD_SET(i, &res_write_set);
+            count++;
+        }
+        if (except_set && FD_ISSET(i, except_set) && (fd->revents & POLLPRI)) {
+            FD_SET(i, &res_except_set);
+            count++;
+        }
+    }
+
+    if (read_set) *read_set = res_read_set;
+    if (write_set) *write_set = res_write_set;
+    if (except_set) *except_set = res_except_set;
+
+    if (fds != stack_fds) free(fds);
+    *num_events = count;
     return 0;
 }
 
@@ -503,23 +589,10 @@ int sys_listen(int fd, int backlog) {
 // Sockets: Accept
 int sys_accept(int fd, int *newfd, struct sockaddr *addr, socklen_t *addrlen, int flags) {
     (void)flags;
-    long rc;
-    
-    // Check if the file descriptor has O_NONBLOCK set
-    long fd_flags = syscall3(SYS_FCNTL, fd, F_GETFL, 0);
-    bool nonblocking = (fd_flags >= 0 && (fd_flags & O_NONBLOCK));
-    
-    if (nonblocking) {
-        rc = syscall3(SYS_ACCEPT, fd, (uint64_t)addr, (uint64_t)addrlen);
-        if (rc == -2) return EAGAIN;
-    } else {
-        for (;;) {
-            rc = syscall3(SYS_ACCEPT, fd, (uint64_t)addr, (uint64_t)addrlen);
-            if (rc != -2) break;
-            syscall0(SYS_SCHED_YIELD);
-        }
+    long rc = syscall3(SYS_ACCEPT, fd, (uint64_t)addr, (uint64_t)addrlen);
+    if (rc == -2) {
+        return EAGAIN;
     }
-    
     if (rc < 0) {
         return -rc;
     }
@@ -529,12 +602,8 @@ int sys_accept(int fd, int *newfd, struct sockaddr *addr, socklen_t *addrlen, in
 
 // Sockets: Sendto
 ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen, ssize_t *length) {
-    long rc;
-    if (dest_addr == nullptr) {
-        rc = syscall3(SYS_WRITE, fd, (uint64_t)buf, len);
-    } else {
-        rc = syscall6(SYS_SENDTO, fd, (uint64_t)buf, len, flags, (uint64_t)dest_addr, addrlen);
-    }
+    long rc = syscall6(SYS_SENDTO, fd, (uint64_t)buf, len, flags,
+                       (uint64_t)dest_addr, dest_addr ? (uint64_t)addrlen : 0);
     if (rc < 0) {
         if (rc == -2) return EAGAIN;
         return -rc;
@@ -545,21 +614,68 @@ ssize_t sys_sendto(int fd, const void *buf, size_t len, int flags, const struct 
 
 // Sockets: Recvfrom
 ssize_t sys_recvfrom(int fd, void *buf, size_t len, int flags, struct sockaddr *src_addr, socklen_t *addrlen, ssize_t *length) {
-    long rc;
-    if (src_addr == nullptr) {
-        rc = syscall3(SYS_READ, fd, (uint64_t)buf, len);
-    } else {
-        uint64_t temp_len = addrlen ? *addrlen : 0;
-        rc = syscall6(SYS_RECVFROM, fd, (uint64_t)buf, len, flags, (uint64_t)src_addr, (uint64_t)&temp_len);
-        if (rc >= 0 && addrlen) {
-            *addrlen = temp_len;
-        }
+    uint64_t temp_len = (src_addr && addrlen) ? (uint64_t)*addrlen : 0;
+    long rc = syscall6(SYS_RECVFROM, fd, (uint64_t)buf, len, flags,
+                       (uint64_t)src_addr, src_addr ? (uint64_t)&temp_len : 0);
+    if (rc >= 0 && src_addr && addrlen) {
+        *addrlen = (socklen_t)temp_len;
     }
     if (rc < 0) {
         if (rc == -2) return EAGAIN;
         return -rc;
     }
     *length = rc;
+    return 0;
+}
+
+// Sockets: Setsockopt
+int sys_setsockopt(int fd, int layer, int number, const void *buffer, socklen_t size) {
+    long rc = syscall5(SYS_SETSOCKOPT, fd, layer, number, (uint64_t)buffer, size);
+    if (rc < 0) return -rc;
+    return 0;
+}
+
+// Sockets: Getsockopt
+int sys_getsockopt(int fd, int layer, int number, void *buffer, socklen_t *size) {
+    long rc = syscall5(SYS_GETSOCKOPT, fd, layer, number, (uint64_t)buffer, (uint64_t)size);
+    if (rc < 0) return -rc;
+    return 0;
+}
+
+// Sockets: Socketpair
+int sys_socketpair(int domain, int type, int protocol, int *sv) {
+    long rc = syscall4(SYS_SOCKETPAIR, domain, type, protocol, (uint64_t)sv);
+    if (rc < 0) return -rc;
+    return 0;
+}
+
+// Sockets: Getsockname
+int sys_getsockname(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    long rc = syscall3(SYS_GETSOCKNAME, fd, (uint64_t)addr, (uint64_t)addrlen);
+    if (rc < 0) return -rc;
+    return 0;
+}
+
+// Sockets: Getpeername
+int sys_getpeername(int fd, struct sockaddr *addr, socklen_t *addrlen) {
+    long rc = syscall3(SYS_GETPEERNAME, fd, (uint64_t)addr, (uint64_t)addrlen);
+    if (rc < 0) return -rc;
+    return 0;
+}
+
+// Sockets: Sendmsg
+int sys_msg_send(int fd, const struct msghdr *msg, int flags, ssize_t *length) {
+    long rc = syscall3(SYS_SENDMSG, fd, (uint64_t)msg, flags);
+    if (rc < 0) return -rc;
+    if (length) *length = rc;
+    return 0;
+}
+
+// Sockets: Recvmsg
+int sys_msg_recv(int fd, struct msghdr *msg, int flags, ssize_t *length) {
+    long rc = syscall3(SYS_RECVMSG, fd, (uint64_t)msg, flags);
+    if (rc < 0) return -rc;
+    if (length) *length = rc;
     return 0;
 }
 

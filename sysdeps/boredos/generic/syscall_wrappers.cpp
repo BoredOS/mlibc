@@ -251,30 +251,7 @@ void sys_kill(int pid) {
 }
 
 
-int icmp_ping(const net_ipv4_address_t *dest_ip) {
-    int fd = sys_open("/sys/class/net/eth0/ping", "r+");
-    if (fd < 0) return -1;
-    char ip_str[64];
-    sprintf(ip_str, "%d.%d.%d.%d", dest_ip->bytes[0], dest_ip->bytes[1], dest_ip->bytes[2], dest_ip->bytes[3]);
-    sys_write(fd, ip_str, strlen(ip_str));
-    sys_seek(fd, 0, 0);
-    char buf[64];
-    int n = sys_read(fd, buf, sizeof(buf) - 1);
-    sys_close(fd);
-    if (n <= 0) return -1;
-    buf[n] = '\0';
-    char *p = strstr(buf, "success");
-    if (!p) return -1;
-    // Parse RTT: "success <ms>\n"
-    p += 7; // skip "success"
-    while (*p == ' ') p++;
-    int rtt = 0;
-    while (*p >= '0' && *p <= '9') {
-        rtt = rtt * 10 + (*p - '0');
-        p++;
-    }
-    return rtt;
-}
+
 
 void set_text_color(uint32_t color) {
     char seq[64];
@@ -286,25 +263,45 @@ void set_text_color(uint32_t color) {
 }
 
 int dns_lookup(const char *name, net_ipv4_address_t *out_ip) {
-    uint32_t dns_server = 0x01010101; // 1.1.1.1 (network byte order)
-    int fd = sys_open("/etc/resolv.conf", "r");
+    if (!name || !*name || !out_ip) return -1;
+    if (strcmp(name, "localhost") == 0 || strcmp(name, "localhost.localdomain") == 0) {
+        out_ip->bytes[0] = 127;
+        out_ip->bytes[1] = 0;
+        out_ip->bytes[2] = 0;
+        out_ip->bytes[3] = 1;
+        return 0;
+    }
+    uint32_t dns_servers[4];
+    int num_dns = 0;
+
+    int fd = sys_open("/etc/resolv.conf", 0 /* O_RDONLY */);
     if (fd >= 0) {
-        char buf[128];
+        char buf[256];
         int bytes = sys_read(fd, buf, sizeof(buf) - 1);
         sys_close(fd);
         if (bytes > 0) {
             buf[bytes] = '\0';
-            char *ns = strstr(buf, "nameserver");
-            if (ns) {
+            char *line = buf;
+            while (line && *line && num_dns < 4) {
+                char *ns = strstr(line, "nameserver");
+                if (!ns) break;
                 ns += 10;
                 while (*ns == ' ' || *ns == '\t') ns++;
                 int ip[4];
                 if (sscanf(ns, "%d.%d.%d.%d", &ip[0], &ip[1], &ip[2], &ip[3]) == 4) {
-                    dns_server = (ip[0] & 0xFF) | ((ip[1] & 0xFF) << 8) | ((ip[2] & 0xFF) << 16) | ((ip[3] & 0xFF) << 24);
+                    uint32_t s = (ip[0] & 0xFF) | ((ip[1] & 0xFF) << 8) | ((ip[2] & 0xFF) << 16) | ((ip[3] & 0xFF) << 24);
+                    int exists = 0;
+                    for (int k = 0; k < num_dns; k++) {
+                        if (dns_servers[k] == s) { exists = 1; break; }
+                    }
+                    if (!exists) dns_servers[num_dns++] = s;
                 }
+                line = strchr(ns, '\n');
+                if (line) line++;
             }
         }
     }
+    if (num_dns == 0) return -1;
 
     int sockfd = (int)syscall3(SYS_SOCKET, 2 /* AF_INET */, 2 /* SOCK_DGRAM */, 0);
     if (sockfd < 0) return -1;
@@ -342,20 +339,19 @@ int dns_lookup(const char *name, net_ipv4_address_t *out_ip) {
         uint32_t sin_addr;
         char sin_zero[8];
     } dest;
-    memset(&dest, 0, sizeof(dest));
-    dest.sin_family = 2; // AF_INET
-    dest.sin_port = ((53 & 0xFF) << 8) | ((53 >> 8) & 0xFF); // htons(53)
-    dest.sin_addr = dns_server;
 
-    if ((int)syscall6(SYS_SENDTO, (uint64_t)sockfd, (uint64_t)query, (uint64_t)query_len, 0, (uint64_t)&dest, sizeof(dest)) < 0) {
-        sys_close(sockfd);
-        return -1;
+    for (int s_idx = 0; s_idx < num_dns; s_idx++) {
+        memset(&dest, 0, sizeof(dest));
+        dest.sin_family = 2; // AF_INET
+        dest.sin_port = ((53 & 0xFF) << 8) | ((53 >> 8) & 0xFF); // htons(53)
+        dest.sin_addr = dns_servers[s_idx];
+        syscall6(SYS_SENDTO, (uint64_t)sockfd, (uint64_t)query, (uint64_t)query_len, 0, (uint64_t)&dest, sizeof(dest));
     }
 
     uint8_t resp[1024];
     int resp_len = -1;
     int start_ticks = get_ticks();
-    while (get_ticks() - start_ticks < 5000) {
+    while (get_ticks() - start_ticks < 1500) {
         struct sockaddr_in src_addr;
         uint64_t addr_len = sizeof(src_addr);
         resp_len = (int)syscall6(SYS_RECVFROM, (uint64_t)sockfd, (uint64_t)resp, sizeof(resp), 0, (uint64_t)&src_addr, (uint64_t)&addr_len);

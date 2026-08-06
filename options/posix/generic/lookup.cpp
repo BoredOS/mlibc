@@ -5,10 +5,13 @@
 #include <bits/ensure.h>
 
 #include <frg/string.hpp>
+#include <frg/vector.hpp>
 #include <mlibc/allocator.hpp>
 #include <string.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -91,103 +94,131 @@ int lookup_name_dns(struct lookup_result &buf, const char *name,
 
 	mlibc::service_result serv_buf{getAllocator()};
 	int serv_count = mlibc::lookup_serv_by_name(serv_buf, "domain", IPPROTO_UDP, SOCK_DGRAM, 0);
-	if (serv_count < 0) {
-		mlibc::infoLogger() << "mlibc: could not resolve DNS service" << frg::endlog;
-		return -EAI_SERVICE;
+	if (serv_count < 0 || serv_buf.size() == 0) {
+		mlibc::service_buf sb;
+		sb.port = 53;
+		serv_buf.push_back(std::move(sb));
 	}
 
-	struct sockaddr_in sin = {};
-	sin.sin_family = AF_INET;
-	sin.sin_port = htons(serv_buf[0].port);
-
-	auto nameserver = get_nameserver();
-	if (!inet_aton(nameserver ? nameserver->name.data() : "127.0.0.1", &sin.sin_addr)) {
-		mlibc::infoLogger() << "lookup_name_dns(): inet_aton() failed!" << frg::endlog;
-		return -EAI_SYSTEM;
+	auto servers = get_nameservers();
+	if (servers.size() == 0) {
+		mlibc::infoLogger() << "lookup_name_dns(): no nameserver configured in /etc/resolv.conf" << frg::endlog;
+		return -EAI_NONAME;
 	}
 
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (fd < 0) {
-		mlibc::infoLogger() << "lookup_name_dns(): socket() failed" << frg::endlog;
-		return -EAI_SYSTEM;
-	}
+	for (size_t si = 0; si < servers.size(); si++) {
+		struct sockaddr_in sin = {};
+		sin.sin_family = AF_INET;
+		sin.sin_port = htons(serv_buf[0].port);
 
-	size_t sent = sendto(fd, request.data(), request.size(), 0,
-			(struct sockaddr*)&sin, sizeof(sin));
-	if (sent != request.size()) {
-		mlibc::infoLogger() << "lookup_name_dns(): sendto() failed to send everything" << frg::endlog;
-		return -EAI_SYSTEM;
-	}
-
-	char response[256];
-	ssize_t rlen;
-	int num_ans = 0;
-	while ((rlen = recvfrom(fd, response, 256, 0, nullptr, nullptr)) >= 0) {
-		if ((size_t)rlen < sizeof(struct dns_header))
+		if (!inet_aton(servers[si].name.data(), &sin.sin_addr)) {
+			mlibc::infoLogger() << "lookup_name_dns(): inet_aton() failed for server " << si << frg::endlog;
 			continue;
-		auto response_header = reinterpret_cast<struct dns_header*>(response);
-		if (response_header->identification != header.identification)
-			return -EAI_FAIL;
-
-		if ((ntohs(response_header->flags) & 0xF) == RETURN_NXDOMAIN)
-			return -EAI_NONAME;
-
-		auto it = response + sizeof(struct dns_header);
-		for (int i = 0; i < ntohs(response_header->no_q); i++) {
-			auto dns_name = read_dns_name(response, it);
-			(void) dns_name;
-			it += 4;
 		}
 
-		for (int i = 0; i < ntohs(response_header->no_ans); i++) {
-			struct dns_addr_buf buffer;
-			auto dns_name = read_dns_name(response, it);
+		int fd = socket(AF_INET, SOCK_DGRAM, 0);
+		if (fd < 0) {
+			mlibc::infoLogger() << "lookup_name_dns(): socket() failed" << frg::endlog;
+			return -EAI_SYSTEM;
+		}
 
-			uint16_t rr_type = (it[0] << 8) | it[1];
-			uint16_t rr_class = (it[2] << 8) | it[3];
-			uint16_t rr_length = (it[8] << 8) | it[9];
-			it += 10;
-			(void)rr_class;
+		// 3-second receive timeout so a dead server doesn't hang forever
+		struct timeval tv;
+		tv.tv_sec = 3;
+		tv.tv_usec = 0;
+		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-			switch (rr_type) {
-				case RECORD_A:
-					if (family != AF_UNSPEC && family != AF_INET)
-						continue;
+		size_t sent = sendto(fd, request.data(), request.size(), 0,
+				(struct sockaddr*)&sin, sizeof(sin));
+		if (sent != request.size()) {
+			mlibc::infoLogger() << "lookup_name_dns(): sendto() failed, trying next server" << frg::endlog;
+			close(fd);
+			continue;
+		}
 
-					memcpy(buffer.addr, it, rr_length);
-					it += rr_length;
-					buffer.family = AF_INET;
-					buffer.name = std::move(dns_name);
-					buf.buf.push(std::move(buffer));
-					break;
-				case RECORD_AAAA:
-					if (family != AF_UNSPEC && family != AF_INET6)
-						continue;
+		char response[256];
+		ssize_t rlen;
+		int num_ans = 0;
+		bool got_answer = false;
+		bool nxdomain = false;
+		while ((rlen = recvfrom(fd, response, 256, 0, nullptr, nullptr)) >= 0) {
+			if ((size_t)rlen < sizeof(struct dns_header))
+				continue;
+			auto response_header = reinterpret_cast<struct dns_header*>(response);
+			if (response_header->identification != header.identification)
+				break;
 
-					memcpy(buffer.addr, it, rr_length);
-					it += rr_length;
-					buffer.family = AF_INET6;
-					buffer.name = std::move(dns_name);
-					buf.buf.push(std::move(buffer));
-					break;
-				case RECORD_CNAME:
-					canon_name = read_dns_name(response, it);
-					buf.aliases.push(std::move(dns_name));
-					break;
-				default:
-					mlibc::infoLogger() << "lookup_name_dns: unknown rr type "
-						<< rr_type << frg::endlog;
-					break;
+			if ((ntohs(response_header->flags) & 0xF) == RETURN_NXDOMAIN) {
+				nxdomain = true;
+				break;
+			}
+
+			auto it = response + sizeof(struct dns_header);
+			for (int i = 0; i < ntohs(response_header->no_q); i++) {
+				auto dns_name = read_dns_name(response, it);
+				(void) dns_name;
+				it += 4;
+			}
+
+			for (int i = 0; i < ntohs(response_header->no_ans); i++) {
+				struct dns_addr_buf buffer;
+				auto dns_name = read_dns_name(response, it);
+
+				uint16_t rr_type = (it[0] << 8) | it[1];
+				uint16_t rr_class = (it[2] << 8) | it[3];
+				uint16_t rr_length = (it[8] << 8) | it[9];
+				it += 10;
+				(void)rr_class;
+
+				switch (rr_type) {
+					case RECORD_A:
+						if (family != AF_UNSPEC && family != AF_INET)
+							continue;
+						memcpy(buffer.addr, it, rr_length);
+						it += rr_length;
+						buffer.family = AF_INET;
+						buffer.name = std::move(dns_name);
+						buf.buf.push(std::move(buffer));
+						break;
+					case RECORD_AAAA:
+						if (family != AF_UNSPEC && family != AF_INET6)
+							continue;
+						memcpy(buffer.addr, it, rr_length);
+						it += rr_length;
+						buffer.family = AF_INET6;
+						buffer.name = std::move(dns_name);
+						buf.buf.push(std::move(buffer));
+						break;
+					case RECORD_CNAME:
+						canon_name = read_dns_name(response, it);
+						buf.aliases.push(std::move(dns_name));
+						break;
+					default:
+						mlibc::infoLogger() << "lookup_name_dns: unknown rr type "
+							<< rr_type << frg::endlog;
+						break;
+				}
+			}
+			num_ans += ntohs(response_header->no_ans);
+			if (num_ans >= num_q) {
+				got_answer = true;
+				break;
 			}
 		}
-		num_ans += ntohs(response_header->no_ans);
 
-		if (num_ans >= num_q)
-			break;
+		close(fd);
+
+		// NXDOMAIN is authoritative — no point querying other servers
+		if (nxdomain)
+			return -EAI_NONAME;
+
+		if (got_answer)
+			return (int)buf.buf.size();
+
+		mlibc::infoLogger() << "lookup_name_dns(): server " << si << " timed out, trying next" << frg::endlog;
 	}
 
-	close(fd);
-	return buf.buf.size();
+	return -EAI_NONAME;
 }
 
 int lookup_addr_dns(frg::span<char> name, frg::array<uint8_t, 16> &addr, int family) {
@@ -245,81 +276,108 @@ int lookup_addr_dns(frg::span<char> name, frg::array<uint8_t, 16> &addr, int fam
 		return -EAI_SERVICE;
 	}
 
-	struct sockaddr_in sin = {};
-	sin.sin_family = AF_INET;
-	sin.sin_port = htons(serv_buf[0].port);
-
-	auto nameserver = get_nameserver();
-	if (!inet_aton(nameserver ? nameserver->name.data() : "127.0.0.1", &sin.sin_addr)) {
-		mlibc::infoLogger() << "lookup_name_dns(): inet_aton() failed!" << frg::endlog;
-		return -EAI_SYSTEM;
+	auto servers = get_nameservers();
+	if (servers.size() == 0) {
+		mlibc::infoLogger() << "lookup_addr_dns(): no nameserver configured in /etc/resolv.conf" << frg::endlog;
+		return -EAI_NONAME;
 	}
 
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
-	if (fd < 0) {
-		mlibc::infoLogger() << "lookup_name_dns(): socket() failed" << frg::endlog;
-		return -EAI_SYSTEM;
-	}
+	for (size_t si = 0; si < servers.size(); si++) {
+		struct sockaddr_in sin = {};
+		sin.sin_family = AF_INET;
+		sin.sin_port = htons(serv_buf[0].port);
 
-	size_t sent = sendto(fd, request.data(), request.size(), 0,
-			(struct sockaddr*)&sin, sizeof(sin));
-	if (sent != request.size()) {
-		mlibc::infoLogger() << "lookup_name_dns(): sendto() failed to send everything" << frg::endlog;
-		return -EAI_SYSTEM;
-	}
-
-	char response[256];
-	ssize_t rlen;
-	int num_ans = 0;
-	while ((rlen = recvfrom(fd, response, 256, 0, NULL, NULL)) >= 0) {
-		if ((size_t)rlen < sizeof(struct dns_header))
+		if (!inet_aton(servers[si].name.data(), &sin.sin_addr)) {
+			mlibc::infoLogger() << "lookup_addr_dns(): inet_aton() failed for server " << si << frg::endlog;
 			continue;
-		auto response_header = reinterpret_cast<struct dns_header*>(response);
-		if (response_header->identification != header.identification)
-			return -EAI_FAIL;
-
-		auto it = response + sizeof(struct dns_header);
-		for (int i = 0; i < ntohs(response_header->no_q); i++) {
-			auto dns_name = read_dns_name(response, it);
-			(void) dns_name;
-			it += 4;
 		}
 
-		for (int i = 0; i < ntohs(response_header->no_ans); i++) {
-			struct dns_addr_buf buffer;
-			auto dns_name = read_dns_name(response, it);
+		int fd = socket(AF_INET, SOCK_DGRAM, 0);
+		if (fd < 0) {
+			mlibc::infoLogger() << "lookup_addr_dns(): socket() failed" << frg::endlog;
+			return -EAI_SYSTEM;
+		}
 
-			uint16_t rr_type = (it[0] << 8) | it[1];
-			uint16_t rr_class = (it[2] << 8) | it[3];
-			uint16_t rr_length = (it[8] << 8) | it[9];
-			it += 10;
-			(void)rr_class;
-			(void)rr_length;
+		// 3-second receive timeout so a dead server doesn't hang forever
+		struct timeval tv;
+		tv.tv_sec = 3;
+		tv.tv_usec = 0;
+		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-			(void)dns_name;
+		size_t sent = sendto(fd, request.data(), request.size(), 0,
+				(struct sockaddr*)&sin, sizeof(sin));
+		if (sent != request.size()) {
+			mlibc::infoLogger() << "lookup_addr_dns(): sendto() failed, trying next server" << frg::endlog;
+			close(fd);
+			continue;
+		}
 
-			switch (rr_type) {
-				case RECORD_PTR: {
-					auto ptr_name = read_dns_name(response, it);
-					if (ptr_name.size() >= name.size())
-						return -EAI_OVERFLOW;
-					std::copy(ptr_name.begin(), ptr_name.end(), name.data());
-					name.data()[ptr_name.size()] = '\0';
-					return 1;
-				}
-				default:
-					mlibc::infoLogger() << "lookup_addr_dns: unknown rr type "
-						<< rr_type << frg::endlog;
-					break;
+		char response[256];
+		ssize_t rlen;
+		int num_ans = 0;
+		bool got_answer = false;
+		while ((rlen = recvfrom(fd, response, 256, 0, NULL, NULL)) >= 0) {
+			if ((size_t)rlen < sizeof(struct dns_header))
+				continue;
+			auto response_header = reinterpret_cast<struct dns_header*>(response);
+			if (response_header->identification != header.identification)
+				break;
+
+			auto it = response + sizeof(struct dns_header);
+			for (int i = 0; i < ntohs(response_header->no_q); i++) {
+				auto dns_name = read_dns_name(response, it);
+				(void) dns_name;
+				it += 4;
 			}
-			num_ans += ntohs(response_header->no_ans);
 
-			if (num_ans >= num_q)
+			for (int i = 0; i < ntohs(response_header->no_ans); i++) {
+				struct dns_addr_buf buffer;
+				auto dns_name = read_dns_name(response, it);
+
+				uint16_t rr_type = (it[0] << 8) | it[1];
+				uint16_t rr_class = (it[2] << 8) | it[3];
+				uint16_t rr_length = (it[8] << 8) | it[9];
+				it += 10;
+				(void)rr_class;
+				(void)rr_length;
+				(void)dns_name;
+
+				switch (rr_type) {
+					case RECORD_PTR: {
+						auto ptr_name = read_dns_name(response, it);
+						if (ptr_name.size() >= name.size()) {
+							close(fd);
+							return -EAI_OVERFLOW;
+						}
+						std::copy(ptr_name.begin(), ptr_name.end(), name.data());
+						name.data()[ptr_name.size()] = '\0';
+						close(fd);
+						return 1;
+					}
+					default:
+						mlibc::infoLogger() << "lookup_addr_dns: unknown rr type "
+							<< rr_type << frg::endlog;
+						break;
+				}
+				num_ans += ntohs(response_header->no_ans);
+
+				if (num_ans >= num_q) {
+					got_answer = true;
+					break;
+				}
+			}
+			if (got_answer)
 				break;
 		}
+
+		close(fd);
+
+		if (got_answer)
+			return 0;
+
+		mlibc::infoLogger() << "lookup_addr_dns(): server " << si << " timed out, trying next" << frg::endlog;
 	}
 
-	close(fd);
 	return 0;
 }
 
