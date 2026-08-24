@@ -242,9 +242,6 @@ typedef struct {
 
 int sys_disk_get_count(void);
 int sys_disk_get_info(int index, disk_info_t *out);
-int sys_disk_write_gpt(const char *devname, partition_spec_t *parts, int count);
-int sys_disk_write_mbr(const char *devname, partition_spec_t *parts, int count);
-int sys_disk_mkfs_fat32(const char *devname, const char *label);
 int sys_disk_mount(const char *devname, const char *mountpoint);
 int sys_disk_umount(const char *mountpoint);
 int sys_disk_sync(const char *mountpoint);

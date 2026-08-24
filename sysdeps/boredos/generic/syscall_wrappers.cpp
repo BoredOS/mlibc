@@ -99,7 +99,11 @@ int sys_write_fs(int fd, const void *buf, uint32_t len) {
 }
 
 void *sys_sbrk(int incr) {
-    return (void *)syscall1(SYS_BRK, (uint64_t)incr);
+    uintptr_t cur = (uintptr_t)syscall1(SYS_BRK, 0);
+    if (incr == 0) return (void *)cur;
+    uintptr_t next = (uintptr_t)syscall1(SYS_BRK, (uint64_t)(cur + incr));
+    if (next == cur && incr > 0) return (void *)-1;
+    return (void *)cur;
 }
 
 int sys_open(const char *path, const char *mode) {
@@ -424,18 +428,6 @@ int sys_disk_get_count(void) {
 
 int sys_disk_get_info(int index, disk_info_t *out) {
     return (int)syscall2(SYS_DISK_GET_INFO, (uint64_t)index, (uint64_t)out);
-}
-
-int sys_disk_write_gpt(const char *devname, partition_spec_t *parts, int count) {
-    return (int)syscall3(SYS_DISK_WRITE_GPT, (uint64_t)devname, (uint64_t)parts, (uint64_t)count);
-}
-
-int sys_disk_write_mbr(const char *devname, partition_spec_t *parts, int count) {
-    return (int)syscall3(SYS_DISK_WRITE_MBR, (uint64_t)devname, (uint64_t)parts, (uint64_t)count);
-}
-
-int sys_disk_mkfs_fat32(const char *devname, const char *label) {
-    return (int)syscall2(SYS_DISK_MKFS_FAT32, (uint64_t)devname, (uint64_t)label);
 }
 
 int sys_disk_mount(const char *devname, const char *mountpoint) {

@@ -110,16 +110,6 @@ static const char *mode_from_flags(int flags) {
 // Open file
 int sys_open(const char *path, int flags, mode_t mode, int *fd) {
     (void)mode;
-    
-    // Check path exists unless creating
-    int exists = sys_exists(path);
-    if ((flags & O_CREAT) && (flags & O_EXCL) && exists) {
-        return EEXIST;
-    }
-    if (!(flags & O_CREAT) && !exists) {
-        return ENOENT;
-    }
-
     long rc = syscall2(SYS_OPEN, (uint64_t)path, (uint64_t)mode_from_flags(flags));
     if (rc < 0) {
         return -rc;
@@ -139,13 +129,9 @@ int sys_close(int fd) {
 
 // Seek file
 int sys_seek(int fd, off_t offset, int whence, off_t *ret) {
-    if (sys_isatty(fd) == 0) {
-        return ESPIPE;
-    }
-
     long rc = syscall3(SYS_LSEEK, fd, offset, whence);
     if (rc < 0) {
-        if (rc == -1) return ESPIPE;
+        if (rc == -29 || rc == -22 || rc == -9 || rc == -1) return ESPIPE;
         return -rc;
     }
     *ret = rc;
@@ -357,9 +343,6 @@ int sys_chdir(const char *path) {
 // Mkdir
 int sys_mkdir(const char *path, mode_t mode) {
     (void)mode;
-    if (sys_exists(path)) {
-        return EEXIST;
-    }
     long rc = syscall1(SYS_MKDIR, (uint64_t)path);
     if (rc < 0) {
         return -rc;
@@ -423,12 +406,8 @@ int sys_fcntl(int fd, int cmd, va_list args, int *result) {
 // Poll
 int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout, int *result) {
     long rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, timeout);
-    if (rc == -2) {
-        if (timeout >= 0) {
-            *result = 0;
-            return 0;
-        }
-        while ((rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, -1)) == -2) {}
+    while (rc == -2) {
+        rc = syscall3(SYS_POLL, (uint64_t)fds, nfds, 0);
     }
     if (rc < 0) {
         return -rc;
@@ -758,9 +737,6 @@ int sys_stat(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat
         if (!path || path[0] == '\0') {
             return EINVAL;
         }
-        if (!sys_exists(path)) {
-            return ENOENT;
-        }
         
         FAT32_FileInfo info;
         if (sys_get_file_info(path, &info) == 0) {
@@ -785,13 +761,20 @@ int sys_stat(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat
                 statbuf->st_blocks = (statbuf->st_size + 511) / 512;
                 syscall1(SYS_CLOSE, open_fd);
             } else {
-                return -open_rc;
+                return ENOENT;
             }
         }
     } else if (fsfdt == fsfd_target::fd) {
+        if (fd < 0) return EBADF;
+        if (fd == 0 || fd == 1 || fd == 2) {
+            statbuf->st_mode = S_IFCHR | 0666;
+            statbuf->st_rdev = 1;
+            return 0;
+        }
         long size_rc = syscall1(SYS_SIZE, fd);
         if (size_rc < 0) {
-            return -size_rc;
+            statbuf->st_mode = S_IFCHR | 0666;
+            return 0;
         }
         statbuf->st_size = size_rc;
         statbuf->st_mode = S_IFREG | 0644;

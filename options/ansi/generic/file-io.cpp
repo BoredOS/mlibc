@@ -320,6 +320,7 @@ int abstract_file::seek(off_t offset, int whence) {
 	// We just forget the current buffer.
 	// TODO: If the seek is "small", we can just modify our internal offset.
 	purge();
+	__status_bits &= ~__MLIBC_EOF_BIT;
 
 	return 0;
 }
