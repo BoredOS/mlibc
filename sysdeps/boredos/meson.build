@@ -6,7 +6,7 @@ sysdep_supported_options = {
 }
 
 # Source files
-rtld_sources += files(
+rtld_dso_sources += files(
     'generic/sysdeps.cpp',
     host_machine.cpu_family() + '/syscall.S'
 )
