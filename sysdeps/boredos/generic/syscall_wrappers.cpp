@@ -416,9 +416,7 @@ int dns_lookup(const char *name, net_ipv4_address_t *out_ip) {
     return -1;
 }
 
-int sched_yield(void) {
-    return (int)syscall0(SYS_SCHED_YIELD);
-}
+
 
 
 

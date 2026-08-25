@@ -18,6 +18,7 @@ enum {
     SYS_POLL = 7,
     SYS_LSEEK = 8,
     SYS_MMAP = 9,
+    SYS_MPROTECT = 10,
     SYS_MUNMAP = 11,
     SYS_BRK = 12,
     SYS_RT_SIGACTION = 13,

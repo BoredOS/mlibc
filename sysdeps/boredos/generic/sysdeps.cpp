@@ -20,6 +20,63 @@
 #define TCSETSW 0x5403
 #define TCSETSF 0x5404
 
+static inline uint64_t sys_call0(uint64_t num) {
+    uint64_t ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(num) : "rcx", "r11", "memory");
+    return ret;
+}
+static inline uint64_t sys_call1(uint64_t num, uint64_t a1) {
+    uint64_t ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1) : "rcx", "r11", "memory");
+    return ret;
+}
+static inline uint64_t sys_call2(uint64_t num, uint64_t a1, uint64_t a2) {
+    uint64_t ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1), "S"(a2) : "rcx", "r11", "memory");
+    return ret;
+}
+static inline uint64_t sys_call3(uint64_t num, uint64_t a1, uint64_t a2, uint64_t a3) {
+    uint64_t ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
+    return ret;
+}
+static inline uint64_t sys_call4(uint64_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) {
+    uint64_t ret;
+    register uint64_t r10 asm("r10") = a4;
+    asm volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10) : "rcx", "r11", "memory");
+    return ret;
+}
+static inline uint64_t sys_call5(uint64_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5) {
+    uint64_t ret;
+    register uint64_t r10 asm("r10") = a4;
+    register uint64_t r8 asm("r8") = a5;
+    asm volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8) : "rcx", "r11", "memory");
+    return ret;
+}
+static inline uint64_t sys_call6(uint64_t num, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6) {
+    uint64_t ret;
+    register uint64_t r10 asm("r10") = a4;
+    register uint64_t r8 asm("r8") = a5;
+    register uint64_t r9 asm("r9") = a6;
+    asm volatile("syscall" : "=a"(ret) : "a"(num), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9) : "rcx", "r11", "memory");
+    return ret;
+}
+
+#undef syscall0
+#undef syscall1
+#undef syscall2
+#undef syscall3
+#undef syscall4
+#undef syscall5
+#undef syscall6
+#define syscall0 sys_call0
+#define syscall1 sys_call1
+#define syscall2 sys_call2
+#define syscall3 sys_call3
+#define syscall4 sys_call4
+#define syscall5 sys_call5
+#define syscall6 sys_call6
+
 namespace mlibc {
 
 // Panic implementation
@@ -49,6 +106,7 @@ int sys_isatty(int fd) {
     return ENOTTY;
 }
 
+#ifndef MLIBC_BUILDING_RTLD
 int sys_ptsname(int fd, char *buffer, size_t length) {
     int index = 0;
     int result = 0;
@@ -64,6 +122,7 @@ int sys_unlockpt(int fd) {
     int result = 0;
     return sys_ioctl(fd, 0x40045431 /* TIOCSPTLCK */, &unlock, &result);
 }
+#endif
 
 // Standard file descriptor write
 int sys_write(int fd, void const *buf, size_t size, ssize_t *ret) {
@@ -194,6 +253,15 @@ int sys_vm_unmap(void *ptr, size_t size) {
     return 0;
 }
 
+// VM Protect
+int sys_vm_protect(void *ptr, size_t size, int prot) {
+    long rc = syscall3(SYS_MPROTECT, (uint64_t)ptr, size, prot);
+    if (rc < 0) {
+        return -rc;
+    }
+    return 0;
+}
+
 // Helper time functions
 static int is_leap_year(int year) {
     return ((year % 4) == 0 && (year % 100) != 0) || ((year % 400) == 0);
@@ -226,6 +294,7 @@ static time_t seconds_from_ymdhms(int year, int month, int day, int hour, int mi
     return (time_t)(days * 86400LL + hour * 3600LL + minute * 60LL + second);
 }
 
+#ifndef MLIBC_BUILDING_RTLD
 // Clock Get
 int sys_clock_get(int clock, time_t *secs, long *nanos) {
     if (clock == CLOCK_REALTIME) {
@@ -245,6 +314,7 @@ int sys_clock_get(int clock, time_t *secs, long *nanos) {
     }
     return EINVAL;
 }
+#endif
 
 // Futex wait
 int sys_futex_wait(int *pointer, int expected, const struct timespec *time) {
@@ -416,6 +486,7 @@ int sys_poll(struct pollfd *fds, nfds_t nfds, int timeout, int *result) {
     return 0;
 }
 
+#ifndef MLIBC_BUILDING_RTLD
 // Pselect
 int sys_pselect(
     int nfds,
@@ -499,6 +570,7 @@ int sys_pselect(
     *num_events = count;
     return 0;
 }
+#endif
 
 // Ioctl
 int sys_ioctl(int fd, unsigned long request, void *arg, int *result) {
@@ -708,7 +780,8 @@ int sys_tcb_set(void *pointer) {
 // Access check
 int sys_access(const char *path, int mode) {
     (void)mode;
-    if (!sys_exists(path)) {
+    long rc = syscall1(SYS_EXISTS, (uint64_t)path);
+    if (rc <= 0) {
         return ENOENT;
     }
     return 0;
@@ -738,31 +811,19 @@ int sys_stat(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat
             return EINVAL;
         }
         
-        FAT32_FileInfo info;
-        if (sys_get_file_info(path, &info) == 0) {
-            statbuf->st_size = info.size;
-            if (info.is_directory) {
-                statbuf->st_mode = S_IFDIR | 0755;
-            } else {
-                statbuf->st_mode = S_IFREG | 0644;
+        long open_rc = syscall2(SYS_OPEN, (uint64_t)path, (uint64_t)"rb");
+        if (open_rc >= 0) {
+            int open_fd = open_rc;
+            long size_rc = syscall1(SYS_SIZE, open_fd);
+            if (size_rc >= 0) {
+                statbuf->st_size = size_rc;
             }
+            statbuf->st_mode = S_IFREG | 0644;
             statbuf->st_blocks = (statbuf->st_size + 511) / 512;
-            statbuf->st_ino = info.start_cluster;
+            syscall1(SYS_CLOSE, open_fd);
+            return 0;
         } else {
-            // Fallback: try raw open/size/close
-            long open_rc = syscall2(SYS_OPEN, (uint64_t)path, (uint64_t)"rb");
-            if (open_rc >= 0) {
-                int open_fd = open_rc;
-                long size_rc = syscall1(SYS_SIZE, open_fd);
-                if (size_rc >= 0) {
-                    statbuf->st_size = size_rc;
-                }
-                statbuf->st_mode = S_IFREG | 0644;
-                statbuf->st_blocks = (statbuf->st_size + 511) / 512;
-                syscall1(SYS_CLOSE, open_fd);
-            } else {
-                return ENOENT;
-            }
+            return ENOENT;
         }
     } else if (fsfdt == fsfd_target::fd) {
         if (fd < 0) return EBADF;
@@ -779,11 +840,9 @@ int sys_stat(fsfd_target fsfdt, int fd, const char *path, int flags, struct stat
         statbuf->st_size = size_rc;
         statbuf->st_mode = S_IFREG | 0644;
         statbuf->st_blocks = (statbuf->st_size + 511) / 512;
-    } else {
-        return ENOSYS;
+        return 0;
     }
-
-    return 0;
+    return EINVAL;
 }
 
 // Termios tcgetattr
